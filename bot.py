@@ -3,8 +3,8 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 import json
 import logging
 import os
-TOKEN = os.getenv("TG_BOT_TOKEN1")
-WEB_APP_URL = "https://b126-38-34-166-18.ngrok-free.app"  # ← Update this after starting ngrok
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN",os.getenv("TG_BOT_TOKEN1"))
+WEB_APP_URL = os.getenv("TELEGRAM_BOT_TOKEN","fx-signal-bot-production.up.railway.app")  # ← Update this after starting ngrok
 
 logging.basicConfig(level=logging.INFO)
 
