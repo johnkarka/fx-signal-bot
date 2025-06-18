@@ -2,9 +2,11 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 import json
 import logging
+
 import os
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN",os.getenv("TG_BOT_TOKEN1"))
-WEB_APP_URL = os.getenv("TELEGRAM_BOT_TOKEN","fx-signal-bot-production.up.railway.app")  # ← Update this after starting ngrok
+WEB_APP_URL = os.getenv("WEB_APP_URL","fx-signal-bot-production.up.railway.app")  # ← Update this after starting ngrok
+print(f"Connecting...{WEB_APP_URL}")
 
 logging.basicConfig(level=logging.INFO)
 
