@@ -97,7 +97,13 @@ def shutdown_handler(signum, frame):
     print("✅ App shutdown complete.")
     sys.exit(0)
 
+def check_app_disabled():
+    if os.getenv("APP_DISABLED", "false").lower() == "true":
+        print("🚫 App is disabled. Exiting.")
+        sys.exit(0)
+        
 if __name__ == "__main__":
+    check_app_disabled()
     AsyncIOScheduler.timezone = pytz.utc  # change if needed
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
