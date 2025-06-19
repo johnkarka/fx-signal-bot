@@ -1,16 +1,12 @@
-from flask import Flask, render_template, request
+from flask import Flask
+from app.routes import bp as main_bp
 
-app = Flask(__name__)
+def create_app():
+    app = Flask(__name__)
+    app.register_blueprint(main_bp)
+    return app
 
-@app.route("/")
-def index():
-    return render_template("form.html")
+app = create_app()
 
-@app.route("/submit", methods=["POST"])
-def submit():
-    data = request.form.to_dict()
-    print("✅ Received data from form:", data)
-    return "Thanks!", 200
-
-if __name__ == "__main__":
-    app.run(port=8000)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8001)

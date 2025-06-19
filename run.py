@@ -1,6 +1,7 @@
+import asyncio
+import logging
 from threading import Thread
-from app import app
-from bot import main as run_bot  # Should also expose `updater` if using polling
+from bot import main as run_bot  # async function that runs your Telegram bot
 import subprocess
 import shutil
 import re
@@ -8,8 +9,27 @@ import time
 import os
 import signal
 import sys
+import pytz
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import nest_asyncio
+nest_asyncio.apply()
+from app import create_app
 
+app = create_app()
 cloudflared_proc = None
+logging.basicConfig(level=logging.DEBUG)
+
+def is_tunnel_running():
+    # Simple check: If LOCAL_TUNNEL_URL env var set and URL is reachable, assume tunnel running
+    url = os.getenv("LOCAL_TUNNEL_URL")
+    if not url:
+        return False
+    try:
+        import requests
+        r = requests.get(url, timeout=2)
+        return r.status_code < 500
+    except Exception:
+        return False
 
 def start_web():
     app.run(host="0.0.0.0", port=8001)
@@ -18,6 +38,10 @@ def start_cloudflared_tunnel():
     if not shutil.which("cloudflared"):
         print("⚠️  cloudflared not found, skipping tunnel creation.")
         return None, None
+
+    if is_tunnel_running():
+        print("✅ Existing Cloudflare Tunnel is running, skipping new tunnel start.")
+        return None, os.getenv("LOCAL_TUNNEL_URL")
 
     print("🚀 Starting Cloudflare Tunnel...")
     proc = subprocess.Popen(
@@ -49,16 +73,6 @@ def start_cloudflared_tunnel():
 def shutdown_handler(signum, frame):
     print(f"\n🛑 Received signal {signum}, shutting down...")
 
-    # Stop Telegram polling (assuming updater is imported or set globally)
-    try:
-        from bot import updater  # Your bot module must expose this
-        if updater:
-            print("📴 Stopping Telegram bot polling...")
-            updater.stop()
-            updater.is_idle = False  # Break idle loop
-    except ImportError:
-        print("⚠️ No updater object found in bot module.")
-
     global cloudflared_proc
     if cloudflared_proc and cloudflared_proc.poll() is None:
         print("🛑 Terminating Cloudflare tunnel...")
@@ -73,14 +87,12 @@ def shutdown_handler(signum, frame):
     sys.exit(0)
 
 if __name__ == "__main__":
-    # Register graceful shutdown
+    AsyncIOScheduler.timezone = pytz.utc  # or pytz.timezone("Asia/Yangon")
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
 
-    # Start Flask app in a background thread
     Thread(target=start_web, daemon=True).start()
 
-    # Start tunnel
     cloudflared_proc, url = start_cloudflared_tunnel()
     if url:
         os.environ["LOCAL_TUNNEL_URL"] = url
@@ -88,7 +100,4 @@ if __name__ == "__main__":
     else:
         print("⚠️ Running bot without tunnel URL.")
 
-    # Start Telegram bot (should block)
-    run_bot()
-
-    # No need for while loop — `run_bot()` should block.
+    asyncio.run(run_bot())
