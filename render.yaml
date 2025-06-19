@@ -7,3 +7,5 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: TELEGRAM_BOT_TOKEN
+        value: 7454279325:AAE6MEmv44OANJpVQW5XxJl80Gnuoz5K11s
