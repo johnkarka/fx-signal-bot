@@ -14,6 +14,7 @@ from telegram.ext import (
 import nest_asyncio
 import asyncio
 import signal
+import aiohttp
 
 nest_asyncio.apply()
 
@@ -80,6 +81,20 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
             logging.error(f"[Error parsing web app data] {e}")
             await update.message.reply_text("❌ Error processing strategy.")
 
+async def is_url_alive(url: str) -> bool:
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.head(url, timeout=2) as response:
+                return response.status < 400
+    except Exception:
+        return False
+
+async def get_first_alive_url(candidates):
+    for url in candidates:
+        if url and await is_url_alive(url):
+            return url
+    return None
+
 async def main():
     logging.basicConfig(level=logging.INFO)
     global stats
@@ -89,9 +104,18 @@ async def main():
     if not TOKEN:
         raise ValueError("❌ TELEGRAM_BOT_TOKEN is missing.")
 
-    local_url = os.getenv("LOCAL_TUNNEL_URL")
-    web_url = os.getenv("WEB_APP_URL") or "https://afx-signal-bot-production.up.railway.app"
-    web_app_url = local_url if local_url else web_url
+    url_candidates = [
+        os.getenv("LOCAL_TUNNEL_URL"),
+        os.getenv("WEB_APP_URL"),
+        "https://fx-signal-bot.onrender.com",
+        "https://afx-signal-bot-production.up.railway.app"
+    ]
+
+    web_app_url = await get_first_alive_url(url_candidates)
+
+    if not web_app_url:
+        raise RuntimeError("❌ No reachable Web App URL found.")
+
     form_url = urljoin(web_app_url, FORM_PATH)
 
     print(f"[init] Using Web App URL: {web_app_url}")

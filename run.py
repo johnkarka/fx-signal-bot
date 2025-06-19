@@ -18,7 +18,6 @@ from app import create_app
 nest_asyncio.apply()
 logging.basicConfig(level=logging.DEBUG)
 app = create_app()
-cloudflared_proc = None
 
 def is_tunnel_running():
     """Check if an existing tunnel is running via LOCAL_TUNNEL_URL."""
@@ -31,85 +30,86 @@ def is_tunnel_running():
     except Exception:
         return False
 
+def load_cached_tunnel_url():
+    if not os.getenv("LOCAL_TUNNEL_URL") and os.path.exists(".last_tunnel_url"):
+        with open(".last_tunnel_url") as f:
+            cached_url = f.read().strip()
+            os.environ["LOCAL_TUNNEL_URL"] = cached_url
+            print(f"🔄 Recovered cached tunnel URL: {cached_url}")
+
 def start_web():
     """Start the Flask web app."""
     app.run(host="0.0.0.0", port=8001)
 
-def start_cloudflared_tunnel():
-    """Start or reuse a Cloudflare tunnel to expose localhost:8001."""
+def start_cloudflared_tunnel(max_retries=1):
+    """Start or reuse a free Cloudflare tunnel and return its URL."""
     if not shutil.which("cloudflared"):
         print("⚠️  cloudflared not found, skipping tunnel creation.")
-        return None, None
+        return os.getenv("LOCAL_TUNNEL_URL")
 
     if is_tunnel_running():
-        print("✅ Existing Cloudflare Tunnel is running, skipping new tunnel start.")
-        return None, os.getenv("LOCAL_TUNNEL_URL")
+        print("✅ Reusing existing Cloudflare Tunnel.")
+        return os.getenv("LOCAL_TUNNEL_URL")
 
-    print("🚀 Starting Cloudflare Tunnel...")
-    proc = subprocess.Popen(
-        ["cloudflared", "tunnel", "--url", "http://localhost:8001"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    for attempt in range(max_retries):
+        print(f"🚀 Starting Cloudflare Tunnel... (attempt {attempt + 1})")
+        proc = subprocess.Popen(
+            ["cloudflared", "tunnel", "--url", "http://localhost:8001"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,  # Fully detached process
+        )
 
-    tunnel_url = None
-    for _ in range(60):  # wait up to 30 seconds
-        if proc.poll() is not None:
-            print("❌ cloudflared process exited prematurely.")
-            break
-        line = proc.stdout.readline()
-        if not line:
-            continue
-        print("[cloudflared]", line.strip())
-        match = re.search(r"https://[a-zA-Z0-9.-]+\.trycloudflare\.com", line)
-        if match:
-            tunnel_url = match.group(0)
-            break
-        time.sleep(0.5)
+        tunnel_url = None
+        for _ in range(60):  # wait up to 30 seconds
+            if proc.poll() is not None:
+                print("❌ cloudflared exited too early.")
+                break
+            line = proc.stdout.readline()
+            if not line:
+                continue
+            print("[cloudflared]", line.strip())
+            match = re.search(r"https://[a-zA-Z0-9.-]+\.trycloudflare\.com", line)
+            if match:
+                tunnel_url = match.group(0)
+                break
+            time.sleep(0.5)
 
-    if tunnel_url:
-        print(f"✅ Tunnel URL found: {tunnel_url}")
-        # Optional: Save to .env file for external tools
-        # with open(".env", "a") as f:
-        #     f.write(f"LOCAL_TUNNEL_URL={tunnel_url}\n")
-    else:
-        print("❌ Could not extract tunnel URL from cloudflared output.")
+        if tunnel_url:
+            print(f"✅ Tunnel URL found: {tunnel_url}")
+            os.environ["LOCAL_TUNNEL_URL"] = tunnel_url
+            with open(".last_tunnel_url", "w") as f:
+                f.write(tunnel_url)
+            return tunnel_url
+        else:
+            print("❌ Could not extract tunnel URL.")
 
-    return proc, tunnel_url
+        print("⏳ Waiting 10 seconds before retry...")
+        time.sleep(10)
+
+    print("❌ All attempts to start cloudflared failed.")
+    return None
 
 def shutdown_handler(signum, frame):
-    """Handle graceful shutdown and cleanup."""
-    print(f"\n🛑 Received signal {signum}, shutting down...")
-
-    global cloudflared_proc
-    if cloudflared_proc and cloudflared_proc.poll() is None:
-        print("🛑 Terminating Cloudflare tunnel...")
-        cloudflared_proc.terminate()
-        try:
-            cloudflared_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            print("⚠️ Cloudflare tunnel not exiting, killing...")
-            cloudflared_proc.kill()
-
-    print("✅ Clean shutdown complete.")
+    """Graceful shutdown without killing cloudflared."""
+    print(f"\n🛑 Received signal {signum}, shutting down app (tunnel remains alive).")
+    print("✅ App shutdown complete.")
     sys.exit(0)
 
 if __name__ == "__main__":
-    AsyncIOScheduler.timezone = pytz.utc  # change to pytz.timezone("Asia/Yangon") if needed
+    AsyncIOScheduler.timezone = pytz.utc  # change if needed
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
 
-    # Start Flask in a background thread
-    Thread(target=start_web, daemon=True).start()
+    load_cached_tunnel_url()  # restore tunnel URL if exists
 
-    # Start or reuse tunnel
-    cloudflared_proc, url = start_cloudflared_tunnel()
+    Thread(target=start_web, daemon=True).start()  # Start Flask
+
+    url = start_cloudflared_tunnel()
     if url:
-        os.environ["LOCAL_TUNNEL_URL"] = url
         print(f"🌐 LOCAL_TUNNEL_URL set to: {url}")
     else:
         print("⚠️ Running bot without tunnel URL.")
 
-    # Start the Telegram bot
     asyncio.run(run_bot())
